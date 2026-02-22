@@ -264,11 +264,15 @@
           <div class="absolute inset-0 bg-primary/20 blur-xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500"></div>
           <div class="relative flex items-end gap-2 bg-white dark:bg-card-dark border border-slate-200 dark:border-white/10 rounded-[24px] p-2 shadow-xl ring-1 ring-slate-900/5 focus-within:ring-primary/40 focus-within:border-primary transition-all duration-300">
             <div class="flex flex-col gap-2 p-1">
-              <button type="button" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400 transition-colors" title="Attach">
+              <input type="file" id="file-input" accept=".pdf,.txt,.text" class="hidden" />
+              <button type="button" id="attach-btn" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400 transition-colors" title="Attach PDF or text file">
                 <span class="material-icons-round">add_circle_outline</span>
               </button>
             </div>
-            <textarea id="message-input" class="flex-1 bg-transparent border-none focus:ring-0 text-slate-800 dark:text-slate-200 py-3 resize-none max-h-48 custom-scrollbar placeholder-slate-400" placeholder="Ask anything (with web search)..." rows="1"></textarea>
+            <div class="flex-1 flex flex-col gap-1 min-w-0">
+              <div id="attached-files" class="flex flex-wrap gap-2 hidden"></div>
+              <textarea id="message-input" class="bg-transparent border-none focus:ring-0 text-slate-800 dark:text-slate-200 py-3 resize-none max-h-48 custom-scrollbar placeholder-slate-400" placeholder="Ask anything (or attach a PDF/text to ask from it)..." rows="1"></textarea>
+            </div>
             <div class="flex items-center gap-1 p-1">
               <button type="button" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400 transition-colors" title="Voice input">
                 <span class="material-icons-round">mic</span>
@@ -351,8 +355,9 @@
     }
 
     async function api(path, options = {}) {
-      const headers = { 'Content-Type': 'application/json', ...options.headers };
+      const headers = { ...options.headers };
       if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+      if (!(options.body instanceof FormData)) headers['Content-Type'] = 'application/json';
       const res = await fetch(API_BASE + path, { ...options, headers });
       if (res.status === 401 && refreshToken) {
         try {
@@ -481,6 +486,8 @@
 
     document.getElementById('logout-btn').onclick = () => {
       clearTokens();
+      currentSessionId = null;
+      currentSessionTitle = 'New Chat';
       showAuth();
     };
 
@@ -604,7 +611,10 @@
     async function loadMessages() {
       if (!currentSessionId) return;
       const res = await api(`/api/sessions/${currentSessionId}/messages`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (res.status === 404) await createOrSelectSession();
+        return;
+      }
       const data = await res.json();
       const container = document.getElementById('messages');
       container.innerHTML = '';
@@ -617,6 +627,29 @@
       });
       container.scrollTop = container.scrollHeight;
     }
+
+    let attachedFile = null;
+    document.getElementById('attach-btn').onclick = () => document.getElementById('file-input').click();
+    document.getElementById('file-input').onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const ext = (file.name || '').toLowerCase();
+      if (!ext.endsWith('.pdf') && !ext.endsWith('.txt') && !ext.endsWith('.text')) {
+        alert('Please select a PDF or text file (.pdf, .txt)');
+        e.target.value = '';
+        return;
+      }
+      attachedFile = file;
+      const container = document.getElementById('attached-files');
+      container.innerHTML = `<span class="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-primary/10 text-primary text-sm"><span class="material-icons-round text-sm">description</span>${file.name.replace(/</g, '&lt;')} <button type="button" class="remove-attach hover:opacity-80" title="Remove">×</button></span>`;
+      container.classList.remove('hidden');
+      container.querySelector('.remove-attach').onclick = () => {
+        attachedFile = null;
+        container.innerHTML = '';
+        container.classList.add('hidden');
+        document.getElementById('file-input').value = '';
+      };
+    };
 
     document.getElementById('send-btn').onclick = sendMessage;
     const textarea = document.getElementById('message-input');
@@ -631,11 +664,22 @@
     async function sendMessage() {
       const text = textarea.value?.trim();
       if (!text || !currentSessionId) return;
+      if (attachedFile && !text) {
+        alert('Please add a question with your attached file.');
+        return;
+      }
       textarea.value = '';
       textarea.style.height = 'auto';
+      const fileToSend = attachedFile;
+      attachedFile = null;
+      const attachContainer = document.getElementById('attached-files');
+      attachContainer.innerHTML = '';
+      attachContainer.classList.add('hidden');
+      document.getElementById('file-input').value = '';
 
+      const displayText = text + (fileToSend ? ` (📎 ${fileToSend.name})` : '');
       const container = document.getElementById('messages');
-      container.appendChild(createUserBubble(text));
+      container.appendChild(createUserBubble(displayText));
 
       const assistantDiv = createAssistantBubble('', '');
       const responseBlock = assistantDiv.querySelector('.response-block');
@@ -643,12 +687,23 @@
       container.appendChild(assistantDiv);
       container.scrollTop = container.scrollHeight;
 
+      const formData = new FormData();
+      formData.append('message', text);
+      if (fileToSend) formData.append('file', fileToSend);
+
       try {
         const res = await api(`/api/sessions/${currentSessionId}/chat`, {
           method: 'POST',
-          body: JSON.stringify({ message: text }),
+          body: formData,
         });
-        if (!res.ok) throw new Error('Request failed');
+        if (!res.ok) {
+          if (res.status === 404) {
+            await createOrSelectSession();
+            throw new Error('Session expired. Starting a new chat — please try again.');
+          }
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.detail || 'Request failed');
+        }
 
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
@@ -698,6 +753,7 @@
       api('/api/auth/me').then(res => {
         if (res.ok) return res.json();
         clearTokens();
+        currentSessionId = null;
         showAuth();
         return null;
       }).then(user => {

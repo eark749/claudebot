@@ -1,14 +1,18 @@
 """FastAPI app - auth, sessions, streaming chat."""
 
 import asyncio
+import io
 import json
 import uuid
+
+from pypdf import PdfReader
+
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from queue import Empty, Queue
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -254,6 +258,31 @@ def sse_format(event: str, data: str) -> str:
     return f"event: {event}\ndata: {data}\n\n"
 
 
+def extract_text_from_file(file: UploadFile) -> str:
+    """Extract text from PDF or plain text file. Raises HTTPException on failure."""
+    filename = (file.filename or "").lower()
+    content = file.file.read()
+    try:
+        if filename.endswith(".pdf"):
+            reader = PdfReader(io.BytesIO(content))
+            parts = []
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    parts.append(text)
+            return "\n\n".join(parts) if parts else ""
+        if filename.endswith(".txt") or filename.endswith(".text"):
+            return content.decode("utf-8", errors="replace")
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type. Use PDF (.pdf) or text (.txt) files.",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Could not read file: {e}") from e
+
+
 def get_system_prompt_for_user(role: str | None, standard: int | None) -> str | None:
     """Build role- and grade-appropriate system prompt for Claude."""
     if role == "teacher":
@@ -299,10 +328,11 @@ def get_system_prompt_for_user(role: str | None, standard: int | None) -> str | 
 @app.post("/api/sessions/{session_id}/chat")
 async def chat(
     session_id: uuid.UUID,
-    body: ChatRequest,
     user: Annotated[dict, Depends(get_current_user)],
+    message: str = Form(...),
+    file: UploadFile | None = File(None),
 ):
-    """Send a message and stream the response via SSE."""
+    """Send a message and stream the response via SSE. Optional file (PDF or .txt) for document Q&A."""
     supabase = get_supabase()
     # Load session, verify ownership
     sess_result = (
@@ -317,12 +347,28 @@ async def chat(
     session_row = sess_result.data[0]
     claude_session_id = session_row.get("claude_session_id")
 
-    # Save user message
+    # Build prompt: include document content if file was uploaded
+    prompt_text = message
+    if file and file.filename:
+        doc_text = extract_text_from_file(file)
+        if doc_text.strip():
+            prompt_text = (
+                f"The user has attached a document (\"{file.filename}\"). "
+                f"Here is its content:\n\n--- Document content ---\n{doc_text}\n--- End document ---\n\n"
+                f"User question: {message}"
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not extract text from the file. The PDF may be empty or image-based.",
+            )
+
+    # Save user message (store original message for display)
     supabase.table("messages").insert(
         {
             "session_id": str(session_id),
             "role": "user",
-            "content": body.message,
+            "content": message + (" (with attached document)" if file and file.filename else ""),
         }
     ).execute()
 
@@ -340,6 +386,13 @@ async def chat(
         role = row.get("role")
         standard = row.get("standard")
     system_prompt = get_system_prompt_for_user(role, standard)
+    if file and file.filename:
+        doc_instruction = (
+            "The user has provided a document with their question. "
+            "Answer based on the document content. Cite or refer to specific parts when relevant. "
+            "If the answer is not in the document, say so clearly."
+        )
+        system_prompt = f"{doc_instruction}\n\n{system_prompt}" if system_prompt else doc_instruction
 
     # Use a thread + sync Queue so the SDK runs in an isolated event loop,
     # avoiding "exit cancel scope in different task" from anyio when the HTTP request ends.
@@ -351,7 +404,7 @@ async def chat(
         async def _produce():
             try:
                 async for event_type, data in stream_chat(
-                    prompt=body.message,
+                    prompt=prompt_text,
                     claude_session_id=claude_session_id,
                     system_prompt=system_prompt,
                 ):
