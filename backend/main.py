@@ -46,6 +46,11 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ProfileUpdateRequest(BaseModel):
+    role: str  # "teacher" | "student"
+    standard: int | None = None  # 1-12 for students, None for teachers
+
+
 class ChatRequest(BaseModel):
     message: str
 
@@ -118,6 +123,47 @@ async def refresh(body: RefreshRequest):
 async def me(user: Annotated[dict, Depends(get_current_user)]):
     """Return current user (validates JWT)."""
     return user
+
+
+@app.get("/api/auth/profile")
+async def get_profile(user: Annotated[dict, Depends(get_current_user)]):
+    """Return user profile (role, standard). None if not set."""
+    supabase = get_supabase()
+    result = (
+        supabase.table("user_profiles")
+        .select("role, standard")
+        .eq("user_id", user["id"])
+        .execute()
+    )
+    if not result.data or len(result.data) == 0:
+        return {"role": None, "standard": None}
+    row = result.data[0]
+    return {"role": row.get("role"), "standard": row.get("standard")}
+
+
+@app.put("/api/auth/profile")
+async def update_profile(
+    body: ProfileUpdateRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Set or update user profile (role, standard for students)."""
+    if body.role not in ("teacher", "student"):
+        raise HTTPException(status_code=400, detail="role must be 'teacher' or 'student'")
+    standard = None
+    if body.role == "student":
+        if body.standard is None or not (1 <= body.standard <= 12):
+            raise HTTPException(status_code=400, detail="students must specify standard 1-12")
+        standard = body.standard
+
+    supabase = get_supabase()
+    row = {
+        "user_id": user["id"],
+        "role": body.role,
+        "standard": standard,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    supabase.table("user_profiles").upsert(row, on_conflict="user_id").execute()
+    return {"role": body.role, "standard": standard}
 
 
 # --- Session routes (JWT required) ---
@@ -208,6 +254,48 @@ def sse_format(event: str, data: str) -> str:
     return f"event: {event}\ndata: {data}\n\n"
 
 
+def get_system_prompt_for_user(role: str | None, standard: int | None) -> str | None:
+    """Build role- and grade-appropriate system prompt for Claude."""
+    if role == "teacher":
+        return (
+            "You are assisting an educator. The user is a teacher. Adapt your responses accordingly: "
+            "Use clear, professional language. Suggest lesson ideas, explanations, and activities when relevant. "
+            "Offer scaffolding and differentiation tips. Help with assessment and curriculum alignment. "
+            "Be supportive and resourceful."
+        )
+    if role == "student" and standard is not None:
+        # Group by approximate age: 1-3 (~6-8), 4-6 (~9-11), 7-9 (~12-14), 10-12 (~15-17)
+        if standard <= 3:
+            return (
+                "The user is a student in Standard 1-3 (approximately 6-8 years old). "
+                "Use very simple vocabulary and short sentences. Be warm, encouraging, and patient. "
+                "Explain things step by step. Avoid jargon; if you use new words, define them simply. "
+                "Use examples from everyday life they can relate to."
+            )
+        if standard <= 6:
+            return (
+                "The user is a student in Standard 4-6 (approximately 9-11 years old). "
+                "Use clear, accessible language. Prefer shorter sentences and concrete examples. "
+                "Be encouraging and supportive. Explain concepts without assuming much prior knowledge. "
+                "Define technical terms when you use them."
+            )
+        if standard <= 9:
+            return (
+                "The user is a student in Standard 7-9 (approximately 12-14 years old). "
+                "Use age-appropriate vocabulary. You can go into more depth while keeping explanations clear. "
+                "Be helpful and engaging. Connect concepts to things they may have learned in school. "
+                "Avoid overly complex or abstract language unless the topic requires it."
+            )
+        # 10-12
+        return (
+            "The user is a student in Standard 10-12 (approximately 15-17 years old). "
+            "Use clear, more advanced vocabulary suitable for high school. "
+            "You can discuss topics in greater depth and use more sophisticated explanations. "
+            "Be supportive while challenging them appropriately. Assume growing academic maturity."
+        )
+    return None
+
+
 @app.post("/api/sessions/{session_id}/chat")
 async def chat(
     session_id: uuid.UUID,
@@ -238,6 +326,21 @@ async def chat(
         }
     ).execute()
 
+    # Fetch user profile for role-aware system prompt
+    profile_result = (
+        supabase.table("user_profiles")
+        .select("role, standard")
+        .eq("user_id", user["id"])
+        .execute()
+    )
+    role = None
+    standard = None
+    if profile_result.data and len(profile_result.data) > 0:
+        row = profile_result.data[0]
+        role = row.get("role")
+        standard = row.get("standard")
+    system_prompt = get_system_prompt_for_user(role, standard)
+
     # Use a thread + sync Queue so the SDK runs in an isolated event loop,
     # avoiding "exit cancel scope in different task" from anyio when the HTTP request ends.
     thread_queue: Queue[tuple[str, str | None] | None] = Queue()
@@ -250,6 +353,7 @@ async def chat(
                 async for event_type, data in stream_chat(
                     prompt=body.message,
                     claude_session_id=claude_session_id,
+                    system_prompt=system_prompt,
                 ):
                     thread_queue.put((event_type, data))
             finally:

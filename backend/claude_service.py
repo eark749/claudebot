@@ -17,6 +17,7 @@ from claude_agent_sdk.types import StreamEvent
 async def stream_chat(
     prompt: str,
     claude_session_id: str | None = None,
+    system_prompt: str | None = None,
 ) -> AsyncIterator[tuple[str, str | None]]:
     """
     Stream Claude's response. Yields (event_type, data) tuples:
@@ -28,6 +29,7 @@ async def stream_chat(
         allowed_tools=["WebSearch"],
         resume=claude_session_id if claude_session_id else None,
         include_partial_messages=True,  # Enable token-level streaming
+        system_prompt=system_prompt,
     )
     session_id = None
     in_tool = False

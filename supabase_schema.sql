@@ -1,5 +1,18 @@
 -- Run this in your Supabase SQL Editor to create the required tables
 
+-- User profiles: role (teacher/student) and standard (1-12 for students)
+CREATE TABLE IF NOT EXISTS user_profiles (
+  user_id TEXT PRIMARY KEY,
+  role TEXT NOT NULL CHECK (role IN ('teacher', 'student')),
+  standard INTEGER CHECK (standard IS NULL OR (standard >= 1 AND standard <= 12)),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  CONSTRAINT student_requires_standard CHECK (
+    (role = 'student' AND standard IS NOT NULL) OR
+    (role = 'teacher' AND standard IS NULL)
+  )
+);
+
 -- Sessions: one per conversation, maps to Claude's session_id
 CREATE TABLE IF NOT EXISTS sessions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -36,3 +49,15 @@ CREATE POLICY "Users can CRUD own sessions"
 CREATE POLICY "Users can CRUD messages in own sessions"
   ON messages FOR ALL
   USING (session_id IN (SELECT id FROM sessions WHERE user_id = auth.uid()::text));
+
+-- RLS for user_profiles: users can only read/update their own profile
+ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can read own profile"
+  ON user_profiles FOR SELECT USING (auth.uid()::text = user_id);
+
+CREATE POLICY "Users can insert own profile"
+  ON user_profiles FOR INSERT WITH CHECK (auth.uid()::text = user_id);
+
+CREATE POLICY "Users can update own profile"
+  ON user_profiles FOR UPDATE USING (auth.uid()::text = user_id);

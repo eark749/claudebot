@@ -146,6 +146,60 @@
     </div>
   </div>
 
+  <!-- Onboarding Modal (role + standard) -->
+  <div id="onboarding-view" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div class="bg-white dark:bg-card-dark border border-slate-200 dark:border-white/10 rounded-2xl p-8 shadow-2xl max-w-md w-full">
+      <div class="flex items-center gap-3 mb-6">
+        <div class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center text-white shadow-lg shadow-primary/20">
+          <span class="material-icons-round text-lg">school</span>
+        </div>
+        <h2 class="font-bold text-xl tracking-tight">Complete your profile</h2>
+      </div>
+      <p class="text-slate-500 dark:text-slate-400 text-sm mb-6">Tell us a bit about yourself so we can personalize your experience.</p>
+      <form id="onboarding-form">
+        <div class="mb-5">
+          <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-3">I am a</label>
+          <div class="flex gap-3">
+            <label class="flex-1 cursor-pointer">
+              <input type="radio" name="role" value="teacher" class="peer sr-only" required />
+              <div class="py-3 px-4 rounded-xl border-2 border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-center font-medium transition-all peer-checked:border-primary peer-checked:bg-primary/10 peer-checked:text-primary hover:border-slate-300 dark:hover:border-white/20">
+                Teacher
+              </div>
+            </label>
+            <label class="flex-1 cursor-pointer">
+              <input type="radio" name="role" value="student" class="peer sr-only" required />
+              <div class="py-3 px-4 rounded-xl border-2 border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-center font-medium transition-all peer-checked:border-primary peer-checked:bg-primary/10 peer-checked:text-primary hover:border-slate-300 dark:hover:border-white/20">
+                Student
+              </div>
+            </label>
+          </div>
+        </div>
+        <div id="standard-group" class="mb-6 hidden">
+          <label class="block text-sm font-medium text-slate-600 dark:text-slate-400 mb-2">Which standard?</label>
+          <select id="onboarding-standard" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all">
+            <option value="">Select standard (1–12)</option>
+            <option value="1">Standard 1</option>
+            <option value="2">Standard 2</option>
+            <option value="3">Standard 3</option>
+            <option value="4">Standard 4</option>
+            <option value="5">Standard 5</option>
+            <option value="6">Standard 6</option>
+            <option value="7">Standard 7</option>
+            <option value="8">Standard 8</option>
+            <option value="9">Standard 9</option>
+            <option value="10">Standard 10</option>
+            <option value="11">Standard 11</option>
+            <option value="12">Standard 12</option>
+          </select>
+        </div>
+        <button type="submit" class="w-full py-3 bg-primary hover:bg-blue-600 text-white font-medium rounded-xl transition-all shadow-lg shadow-primary/20">
+          Continue
+        </button>
+        <p id="onboarding-error" class="text-red-400 text-sm mt-3 hidden"></p>
+      </form>
+    </div>
+  </div>
+
   <!-- App View -->
   <div id="app-view" class="hidden flex-1 flex overflow-hidden">
     <aside class="w-72 bg-white dark:bg-sidebar-dark border-r border-slate-200 dark:border-white/5 flex flex-col transition-all duration-300">
@@ -246,12 +300,19 @@
     function showAuth() {
       document.getElementById('auth-view').classList.remove('hidden');
       document.getElementById('app-view').classList.add('hidden');
+      document.getElementById('onboarding-view').classList.add('hidden');
       document.body.classList.add('flex');
     }
     function showApp() {
       document.getElementById('auth-view').classList.add('hidden');
       document.getElementById('app-view').classList.remove('hidden');
+      document.getElementById('onboarding-view').classList.add('hidden');
       document.getElementById('app-view').classList.add('flex');
+    }
+    function showOnboarding() {
+      document.getElementById('auth-view').classList.add('hidden');
+      document.getElementById('app-view').classList.add('hidden');
+      document.getElementById('onboarding-view').classList.remove('hidden');
     }
 
     function setTokens(access, refresh) {
@@ -272,6 +333,21 @@
       const words = part.split(/[._-]/);
       if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
       return part.slice(0, 2).toUpperCase();
+    }
+
+    async function checkProfileAndShow() {
+      const res = await api('/api/auth/profile');
+      let data = {};
+      try { if (res.ok) data = await res.json(); } catch (_) {}
+      if (data.role) {
+        showApp();
+        loadSessions();
+        if (!currentSessionId) createOrSelectSession();
+        else { loadMessages(); document.getElementById('header-session-title').textContent = currentSessionTitle || 'New Chat'; }
+        return true;
+      }
+      showOnboarding();
+      return false;
     }
 
     async function api(path, options = {}) {
@@ -331,9 +407,7 @@
         document.getElementById('user-email').textContent = data.user.email;
         document.getElementById('user-display-name').textContent = data.user.email.split('@')[0];
         document.getElementById('user-avatar').textContent = getInitials(data.user.email);
-        showApp();
-        loadSessions();
-        createOrSelectSession();
+        await checkProfileAndShow();
       } catch (ex) {
         err.textContent = ex.message;
         err.classList.remove('hidden');
@@ -361,6 +435,41 @@
           document.getElementById('user-display-name').textContent = data.user.email.split('@')[0];
           document.getElementById('user-avatar').textContent = getInitials(data.user.email);
         }
+        await checkProfileAndShow();
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.classList.remove('hidden');
+      }
+    };
+
+    document.querySelectorAll('input[name="role"]').forEach(r => {
+      r.addEventListener('change', () => {
+        const stdGroup = document.getElementById('standard-group');
+        const stdSelect = document.getElementById('onboarding-standard');
+        stdGroup.classList.toggle('hidden', r.value !== 'student');
+        if (r.value !== 'student') stdSelect.value = '';
+      });
+    });
+
+    document.getElementById('onboarding-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const err = document.getElementById('onboarding-error');
+      err.classList.add('hidden');
+      const role = document.querySelector('input[name="role"]:checked')?.value;
+      const standardEl = document.getElementById('onboarding-standard');
+      const standard = role === 'student' ? parseInt(standardEl.value, 10) : null;
+      if (role === 'student' && (!standard || standard < 1 || standard > 12)) {
+        err.textContent = 'Please select your standard (1–12).';
+        err.classList.remove('hidden');
+        return;
+      }
+      try {
+        const res = await api('/api/auth/profile', {
+          method: 'PUT',
+          body: JSON.stringify({ role, standard }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to save profile');
         showApp();
         loadSessions();
         createOrSelectSession();
@@ -590,15 +699,13 @@
         if (res.ok) return res.json();
         clearTokens();
         showAuth();
+        return null;
       }).then(user => {
         if (user) {
           document.getElementById('user-email').textContent = user.email;
           document.getElementById('user-display-name').textContent = user.email.split('@')[0];
           document.getElementById('user-avatar').textContent = getInitials(user.email);
-          showApp();
-          loadSessions();
-          if (!currentSessionId) createOrSelectSession();
-          else { loadMessages(); document.getElementById('header-session-title').textContent = currentSessionTitle || 'New Chat'; }
+          checkProfileAndShow();
         }
       });
     } else {
