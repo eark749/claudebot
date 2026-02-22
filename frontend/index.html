@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Claude AI Chatbot</title>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/lib/marked.umd.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            primary: "#3b82f6",
+            "background-light": "#f9fafb",
+            "background-dark": "#0a0a0b",
+            "sidebar-dark": "#111113",
+            "card-dark": "#1c1c1f",
+          },
+          fontFamily: {
+            display: ["Inter", "sans-serif"],
+          },
+          borderRadius: {
+            DEFAULT: "0.75rem",
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body { font-family: 'Inter', sans-serif; }
+    .glass-effect {
+      backdrop-filter: blur(12px);
+      background-color: rgba(28, 28, 31, 0.7);
+    }
+    .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: #333; border-radius: 10px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #444; }
+    .hidden { display: none !important; }
+    .msg-content { white-space: pre-wrap; }
+    .md-content { white-space: normal; }
+    .md-content h1 { font-size: 1.5em; font-weight: 700; margin: 1em 0 0.5em; }
+    .md-content h2 { font-size: 1.25em; font-weight: 700; margin: 1em 0 0.5em; }
+    .md-content h3 { font-size: 1.1em; font-weight: 600; margin: 0.75em 0 0.4em; }
+    .md-content p { margin: 0.5em 0; }
+    .md-content ul, .md-content ol { margin: 0.5em 0; padding-left: 1.5em; }
+    .md-content ul { list-style-type: disc; }
+    .md-content ol { list-style-type: decimal; }
+    .md-content li { margin: 0.25em 0; }
+    .md-content strong { font-weight: 600; }
+    .md-content em { font-style: italic; }
+    .md-content code {
+      background: rgba(255,255,255,0.06);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+      font-family: 'JetBrains Mono', 'Fira Code', monospace;
+      font-size: 0.875em;
+    }
+    .md-content pre {
+      background: #111113;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 0.75rem;
+      padding: 1em;
+      overflow-x: auto;
+      margin: 0.75em 0;
+    }
+    .md-content pre code {
+      background: none;
+      padding: 0;
+      font-size: 0.85em;
+      color: #c9d1d9;
+    }
+    .md-content hr { border: none; border-top: 1px solid rgba(255,255,255,0.08); margin: 1em 0; }
+    .md-content a { color: #60a5fa; text-decoration: underline; }
+    .md-content a:hover { color: #93bbfd; }
+    .md-content blockquote {
+      border-left: 3px solid rgba(255,255,255,0.15);
+      padding-left: 1em;
+      margin: 0.5em 0;
+      color: #a1a1aa;
+    }
+    .md-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 0.75em 0;
+      font-size: 0.875em;
+    }
+    .md-content thead {
+      border-bottom: 2px solid rgba(255,255,255,0.12);
+    }
+    .md-content th {
+      padding: 0.6em 1em;
+      text-align: left;
+      font-weight: 600;
+      color: #e4e4e7;
+      background: rgba(255,255,255,0.04);
+    }
+    .md-content td {
+      padding: 0.5em 1em;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .md-content tbody tr:hover {
+      background: rgba(255,255,255,0.03);
+    }
+  </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark text-slate-900 dark:text-slate-100 h-screen flex overflow-hidden">
+  <!-- Auth View -->
+  <div id="auth-view" class="w-full max-w-md mx-auto flex flex-col justify-center px-6">
+    <div class="bg-white dark:bg-card-dark border border-slate-200 dark:border-white/10 rounded-2xl p-8 shadow-xl">
+      <div class="flex items-center gap-3 mb-8">
+        <div class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center text-white shadow-lg shadow-primary/20">
+          <span class="material-icons-round text-lg">auto_awesome</span>
+        </div>
+        <h1 class="font-bold text-xl tracking-tight">Claude AI</h1>
+      </div>
+      <h2 class="text-lg font-semibold mb-6">Sign in</h2>
+      <div class="flex gap-2 mb-6 p-1 bg-slate-100 dark:bg-white/5 rounded-xl">
+        <button type="button" id="tab-login" class="flex-1 py-2 px-4 rounded-lg font-medium text-sm bg-primary text-white transition-all">Login</button>
+        <button type="button" id="tab-signup" class="flex-1 py-2 px-4 rounded-lg font-medium text-sm text-slate-600 dark:text-slate-400 hover:bg-white/5 transition-all">Sign up</button>
+      </div>
+      <form id="login-form">
+        <input type="email" id="login-email" placeholder="Email" required
+          class="w-full px-4 py-3 mb-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" />
+        <input type="password" id="login-password" placeholder="Password" required
+          class="w-full px-4 py-3 mb-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" />
+        <button type="submit" class="w-full py-3 bg-primary hover:bg-blue-600 text-white font-medium rounded-xl transition-all shadow-lg shadow-primary/20">
+          Login
+        </button>
+        <p id="login-error" class="text-red-400 text-sm mt-3 hidden"></p>
+      </form>
+      <form id="signup-form" class="hidden">
+        <input type="email" id="signup-email" placeholder="Email" required
+          class="w-full px-4 py-3 mb-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" />
+        <input type="password" id="signup-password" placeholder="Password (min 6 chars)" required minlength="6"
+          class="w-full px-4 py-3 mb-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-primary/40 focus:border-primary transition-all" />
+        <button type="submit" class="w-full py-3 bg-primary hover:bg-blue-600 text-white font-medium rounded-xl transition-all shadow-lg shadow-primary/20">
+          Sign up
+        </button>
+        <p id="signup-error" class="text-red-400 text-sm mt-3 hidden"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- App View -->
+  <div id="app-view" class="hidden flex-1 flex overflow-hidden">
+    <aside class="w-72 bg-white dark:bg-sidebar-dark border-r border-slate-200 dark:border-white/5 flex flex-col transition-all duration-300">
+      <div class="p-6 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 bg-primary rounded-lg flex items-center justify-center text-white shadow-lg shadow-primary/20">
+            <span class="material-icons-round text-sm">auto_awesome</span>
+          </div>
+          <h1 class="font-bold text-lg tracking-tight">Claude AI</h1>
+        </div>
+      </div>
+      <div class="px-4 mb-6">
+        <button type="button" id="new-session-btn" class="w-full flex items-center justify-center gap-2 bg-primary hover:bg-blue-600 text-white font-medium py-3 px-4 rounded-xl transition-all shadow-lg shadow-primary/10 group">
+          <span class="material-icons-round text-[20px] group-hover:rotate-90 transition-transform duration-300">add</span>
+          <span>New Session</span>
+        </button>
+      </div>
+      <div class="flex-1 overflow-y-auto px-3 custom-scrollbar">
+        <div class="mb-4">
+          <p class="px-3 text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Recent Chats</p>
+          <div id="session-list" class="space-y-1"></div>
+        </div>
+      </div>
+      <div class="p-4 border-t border-slate-200 dark:border-white/5">
+        <div class="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 transition-colors">
+          <div id="user-avatar" class="w-10 h-10 rounded-full bg-slate-200 dark:bg-white/10 flex items-center justify-center overflow-hidden text-primary font-semibold text-sm">
+            U
+          </div>
+          <div class="flex-1 min-w-0">
+            <p id="user-display-name" class="text-sm font-semibold truncate">User</p>
+            <p id="user-email" class="text-[11px] text-slate-400 dark:text-slate-500 truncate"></p>
+          </div>
+          <button type="button" id="logout-btn" class="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400 transition-colors cursor-pointer" title="Logout">
+            <span class="material-icons-round text-[18px]">logout</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="flex-1 flex flex-col relative">
+      <header class="h-16 flex items-center justify-between px-8 border-b border-slate-200 dark:border-white/5 bg-white/50 dark:bg-background-dark/50 backdrop-blur-sm z-10">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-medium text-slate-500">History /</span>
+          <span id="header-session-title" class="text-sm font-semibold">New Chat</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 text-slate-500 transition-colors">
+            <span class="material-icons-round">share</span>
+          </button>
+          <button type="button" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 text-slate-500 transition-colors">
+            <span class="material-icons-round">settings</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="flex-1 overflow-y-auto px-4 py-8 custom-scrollbar">
+        <div id="messages" class="max-w-3xl mx-auto space-y-10"></div>
+      </div>
+
+      <div class="p-6">
+        <div class="max-w-3xl mx-auto relative group">
+          <div class="absolute inset-0 bg-primary/20 blur-xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500"></div>
+          <div class="relative flex items-end gap-2 bg-white dark:bg-card-dark border border-slate-200 dark:border-white/10 rounded-[24px] p-2 shadow-xl ring-1 ring-slate-900/5 focus-within:ring-primary/40 focus-within:border-primary transition-all duration-300">
+            <div class="flex flex-col gap-2 p-1">
+              <button type="button" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400 transition-colors" title="Attach">
+                <span class="material-icons-round">add_circle_outline</span>
+              </button>
+            </div>
+            <textarea id="message-input" class="flex-1 bg-transparent border-none focus:ring-0 text-slate-800 dark:text-slate-200 py-3 resize-none max-h-48 custom-scrollbar placeholder-slate-400" placeholder="Ask anything (with web search)..." rows="1"></textarea>
+            <div class="flex items-center gap-1 p-1">
+              <button type="button" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-white/5 text-slate-400 transition-colors" title="Voice input">
+                <span class="material-icons-round">mic</span>
+              </button>
+              <button type="button" id="send-btn" class="w-10 h-10 flex items-center justify-center rounded-full bg-primary text-white shadow-lg shadow-primary/20 hover:scale-105 active:scale-95 transition-all">
+                <span class="material-icons-round text-[20px]">send</span>
+              </button>
+            </div>
+          </div>
+          <div class="mt-3 flex justify-center">
+            <p class="text-[11px] text-slate-400 dark:text-slate-500">Claude can make mistakes. Check important info.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <button type="button" class="fixed bottom-6 right-6 w-12 h-12 bg-white dark:bg-card-dark rounded-full shadow-2xl flex items-center justify-center border border-slate-200 dark:border-white/10 z-50 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-white/10 transition-colors" onclick="document.documentElement.classList.toggle('dark')" title="Toggle dark mode">
+    <span class="material-icons-round">dark_mode</span>
+  </button>
+
+  <script>
+    const API_BASE = 'http://localhost:8000';
+    let accessToken = localStorage.getItem('accessToken');
+    let refreshToken = localStorage.getItem('refreshToken');
+    let currentSessionId = null;
+    let currentSessionTitle = 'New Chat';
+
+    function showAuth() {
+      document.getElementById('auth-view').classList.remove('hidden');
+      document.getElementById('app-view').classList.add('hidden');
+      document.body.classList.add('flex');
+    }
+    function showApp() {
+      document.getElementById('auth-view').classList.add('hidden');
+      document.getElementById('app-view').classList.remove('hidden');
+      document.getElementById('app-view').classList.add('flex');
+    }
+
+    function setTokens(access, refresh) {
+      accessToken = access;
+      refreshToken = refresh || refreshToken;
+      if (access) localStorage.setItem('accessToken', access);
+      if (refresh) localStorage.setItem('refreshToken', refresh);
+    }
+    function clearTokens() {
+      accessToken = refreshToken = null;
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+    }
+
+    function getInitials(email) {
+      if (!email) return 'U';
+      const part = email.split('@')[0];
+      const words = part.split(/[._-]/);
+      if (words.length >= 2) return (words[0][0] + words[1][0]).toUpperCase();
+      return part.slice(0, 2).toUpperCase();
+    }
+
+    async function api(path, options = {}) {
+      const headers = { 'Content-Type': 'application/json', ...options.headers };
+      if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`;
+      const res = await fetch(API_BASE + path, { ...options, headers });
+      if (res.status === 401 && refreshToken) {
+        try {
+          const r = await fetch(API_BASE + '/api/auth/refresh', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: refreshToken }),
+          });
+          if (r.ok) {
+            const data = await r.json();
+            setTokens(data.access_token, data.refresh_token || refreshToken);
+            return api(path, options);
+          }
+        } catch (_) {}
+      }
+      return res;
+    }
+
+    document.getElementById('tab-login').onclick = () => {
+      document.getElementById('tab-login').classList.add('bg-primary', 'text-white');
+      document.getElementById('tab-login').classList.remove('text-slate-600', 'dark:text-slate-400');
+      document.getElementById('tab-signup').classList.remove('bg-primary', 'text-white');
+      document.getElementById('tab-signup').classList.add('text-slate-600', 'dark:text-slate-400');
+      document.getElementById('login-form').classList.remove('hidden');
+      document.getElementById('signup-form').classList.add('hidden');
+    };
+    document.getElementById('tab-signup').onclick = () => {
+      document.getElementById('tab-signup').classList.add('bg-primary', 'text-white');
+      document.getElementById('tab-signup').classList.remove('text-slate-600', 'dark:text-slate-400');
+      document.getElementById('tab-login').classList.remove('bg-primary', 'text-white');
+      document.getElementById('tab-login').classList.add('text-slate-600', 'dark:text-slate-400');
+      document.getElementById('signup-form').classList.remove('hidden');
+      document.getElementById('login-form').classList.add('hidden');
+    };
+
+    document.getElementById('login-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const err = document.getElementById('login-error');
+      err.classList.add('hidden');
+      try {
+        const res = await fetch(API_BASE + '/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('login-email').value,
+            password: document.getElementById('login-password').value,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Login failed');
+        setTokens(data.access_token, data.refresh_token);
+        document.getElementById('user-email').textContent = data.user.email;
+        document.getElementById('user-display-name').textContent = data.user.email.split('@')[0];
+        document.getElementById('user-avatar').textContent = getInitials(data.user.email);
+        showApp();
+        loadSessions();
+        createOrSelectSession();
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.classList.remove('hidden');
+      }
+    };
+
+    document.getElementById('signup-form').onsubmit = async (e) => {
+      e.preventDefault();
+      const err = document.getElementById('signup-error');
+      err.classList.add('hidden');
+      try {
+        const res = await fetch(API_BASE + '/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: document.getElementById('signup-email').value,
+            password: document.getElementById('signup-password').value,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail?.message || data.detail || 'Signup failed');
+        setTokens(data.access_token, data.refresh_token);
+        if (data.user) {
+          document.getElementById('user-email').textContent = data.user.email;
+          document.getElementById('user-display-name').textContent = data.user.email.split('@')[0];
+          document.getElementById('user-avatar').textContent = getInitials(data.user.email);
+        }
+        showApp();
+        loadSessions();
+        createOrSelectSession();
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.classList.remove('hidden');
+      }
+    };
+
+    document.getElementById('logout-btn').onclick = () => {
+      clearTokens();
+      showAuth();
+    };
+
+    function renderSessionItem(s, isActive) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'w-full flex items-center gap-3 px-3 py-3 text-sm font-medium rounded-xl transition-colors group ' +
+        (isActive ? 'bg-slate-100 dark:bg-card-dark text-primary border border-slate-200 dark:border-white/5' : 'hover:bg-slate-100 dark:hover:bg-white/5 text-slate-600 dark:text-slate-400');
+      btn.dataset.id = s.id;
+      btn.innerHTML = `
+        <span class="material-icons-round text-[18px] shrink-0">chat_bubble_outline</span>
+        <span class="truncate flex-1 text-left">${(s.title || 'New Chat').replace(/</g, '&lt;')}</span>
+        <span class="material-icons-round text-[16px] opacity-0 group-hover:opacity-100 delete-session shrink-0" data-id="${s.id}" title="Delete chat">more_horiz</span>
+      `;
+      const moreBtn = btn.querySelector('.delete-session');
+      moreBtn.onclick = (e) => deleteSession(s.id, e);
+      return btn;
+    }
+
+    async function loadSessions() {
+      const res = await api('/api/sessions');
+      if (!res.ok) return;
+      const data = await res.json();
+      const list = document.getElementById('session-list');
+      list.innerHTML = '';
+      (data.sessions || []).forEach(s => {
+        const el = renderSessionItem(s, s.id === currentSessionId);
+        el.onclick = (e) => { if (!e.target.closest('.delete-session')) selectSession(s.id); };
+        list.appendChild(el);
+      });
+    }
+
+    async function deleteSession(id, e) {
+      if (e) e.stopPropagation();
+      if (!confirm('Delete this chat?')) return;
+      const res = await api(`/api/sessions/${id}`, { method: 'DELETE' });
+      if (!res.ok) return;
+      if (currentSessionId === id) {
+        currentSessionId = null;
+        document.getElementById('messages').innerHTML = '';
+        document.getElementById('header-session-title').textContent = 'New Chat';
+      }
+      await loadSessions();
+    }
+
+    async function createOrSelectSession() {
+      const res = await api('/api/sessions', { method: 'POST' });
+      if (!res.ok) return;
+      const data = await res.json();
+      currentSessionId = data.id;
+      currentSessionTitle = data.title || 'New Chat';
+      document.getElementById('header-session-title').textContent = currentSessionTitle;
+      await loadSessions();
+      await loadMessages();
+    }
+
+    document.getElementById('new-session-btn').onclick = createOrSelectSession;
+
+    function selectSession(id) {
+      currentSessionId = id;
+      const session = document.querySelector(`[data-id="${id}"]`);
+      currentSessionTitle = session?.querySelector('.truncate')?.textContent || 'New Chat';
+      document.getElementById('header-session-title').textContent = currentSessionTitle;
+      document.querySelectorAll('#session-list button').forEach(el => {
+        const active = el.dataset.id === id;
+        el.className = 'w-full flex items-center gap-3 px-3 py-3 text-sm font-medium rounded-xl transition-colors group ' +
+          (active ? 'bg-slate-100 dark:bg-card-dark text-primary border border-slate-200 dark:border-white/5' : 'hover:bg-slate-100 dark:hover:bg-white/5 text-slate-600 dark:text-slate-400');
+      });
+      loadMessages();
+    }
+
+    function createUserBubble(text) {
+      const div = document.createElement('div');
+      div.className = 'flex gap-4 items-start justify-end';
+      div.innerHTML = `
+        <div class="max-w-[85%] space-y-3">
+          <p class="text-sm font-semibold text-slate-500 text-right">You</p>
+          <div class="bg-primary text-white p-4 rounded-2xl rounded-tr-none shadow-lg shadow-primary/10 leading-relaxed text-[15px] msg-content">${text.replace(/</g, '&lt;').replace(/\n/g, '<br>')}</div>
+        </div>
+        <div class="w-9 h-9 rounded-full overflow-hidden shrink-0 border-2 border-slate-200 dark:border-white/10 bg-primary/20 flex items-center justify-center">
+          <span class="material-icons-round text-primary text-sm">person</span>
+        </div>
+      `;
+      return div;
+    }
+
+    if (typeof marked !== 'undefined') {
+      marked.setOptions({ breaks: true, gfm: true });
+    }
+
+    function renderMd(text) {
+      if (!text) return '';
+      if (typeof marked !== 'undefined' && marked.parse) {
+        try { return marked.parse(text); } catch (_) {}
+      }
+      return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>');
+    }
+
+    function createAssistantBubble(thinkingContent, responseContent) {
+      const div = document.createElement('div');
+      div.className = 'flex gap-4 items-start';
+      const thinkingHtml = thinkingContent ? `
+        <div class="thinking-block text-sm text-slate-500 dark:text-slate-400 italic mb-3 msg-content">${thinkingContent.replace(/</g, '&lt;').replace(/\n/g, '<br>')}</div>
+      ` : '';
+      const responseHtml = responseContent ? `
+        <div class="response-block md-content text-slate-700 dark:text-slate-300 leading-relaxed text-[15px]">${renderMd(responseContent)}</div>
+      ` : '<div class="response-block md-content text-slate-700 dark:text-slate-300 leading-relaxed text-[15px]"></div>';
+      div.innerHTML = `
+        <div class="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+          <span class="material-icons-round text-primary text-sm">auto_awesome</span>
+        </div>
+        <div class="space-y-3 flex-1 min-w-0">
+          <p class="text-sm font-semibold text-slate-500">Claude</p>
+          ${thinkingHtml}
+          ${responseHtml}
+        </div>
+      `;
+      return div;
+    }
+
+    async function loadMessages() {
+      if (!currentSessionId) return;
+      const res = await api(`/api/sessions/${currentSessionId}/messages`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const container = document.getElementById('messages');
+      container.innerHTML = '';
+      (data.messages || []).forEach(m => {
+        if (m.role === 'user') {
+          container.appendChild(createUserBubble(m.content));
+        } else {
+          container.appendChild(createAssistantBubble('', m.content));
+        }
+      });
+      container.scrollTop = container.scrollHeight;
+    }
+
+    document.getElementById('send-btn').onclick = sendMessage;
+    const textarea = document.getElementById('message-input');
+    textarea.addEventListener('input', function() {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 192) + 'px';
+    });
+    textarea.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+    });
+
+    async function sendMessage() {
+      const text = textarea.value?.trim();
+      if (!text || !currentSessionId) return;
+      textarea.value = '';
+      textarea.style.height = 'auto';
+
+      const container = document.getElementById('messages');
+      container.appendChild(createUserBubble(text));
+
+      const assistantDiv = createAssistantBubble('', '');
+      const responseBlock = assistantDiv.querySelector('.response-block');
+      const contentWrap = assistantDiv.querySelector('.space-y-3');
+      container.appendChild(assistantDiv);
+      container.scrollTop = container.scrollHeight;
+
+      try {
+        const res = await api(`/api/sessions/${currentSessionId}/chat`, {
+          method: 'POST',
+          body: JSON.stringify({ message: text }),
+        });
+        if (!res.ok) throw new Error('Request failed');
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let thinkingBlock = null;
+        let rawResponse = '';
+        let rawThinking = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
+          for (const chunk of lines) {
+            if (chunk.startsWith('event: message')) {
+              const dataMatch = chunk.match(/data: (.+)/);
+              if (dataMatch) {
+                try {
+                  const d = JSON.parse(dataMatch[1]);
+                  if (d.type === 'thinking' && d.content) {
+                    if (!thinkingBlock) {
+                      thinkingBlock = document.createElement('div');
+                      thinkingBlock.className = 'thinking-block text-sm text-slate-500 dark:text-slate-400 italic mb-3 msg-content';
+                      contentWrap.insertBefore(thinkingBlock, responseBlock);
+                    }
+                    rawThinking += d.content;
+                    thinkingBlock.textContent = rawThinking;
+                    thinkingBlock.style.display = 'block';
+                  } else if (d.type === 'text' && d.content) {
+                    rawResponse += d.content;
+                    responseBlock.innerHTML = renderMd(rawResponse);
+                  }
+                } catch (_) {}
+              }
+            }
+          }
+          container.scrollTop = container.scrollHeight;
+        }
+      } catch (ex) {
+        responseBlock.textContent = 'Error: ' + ex.message;
+      }
+      container.scrollTop = container.scrollHeight;
+    }
+
+    if (accessToken) {
+      api('/api/auth/me').then(res => {
+        if (res.ok) return res.json();
+        clearTokens();
+        showAuth();
+      }).then(user => {
+        if (user) {
+          document.getElementById('user-email').textContent = user.email;
+          document.getElementById('user-display-name').textContent = user.email.split('@')[0];
+          document.getElementById('user-avatar').textContent = getInitials(user.email);
+          showApp();
+          loadSessions();
+          if (!currentSessionId) createOrSelectSession();
+          else { loadMessages(); document.getElementById('header-session-title').textContent = currentSessionTitle || 'New Chat'; }
+        }
+      });
+    } else {
+      showAuth();
+    }
+  </script>
+</body>
+</html>
