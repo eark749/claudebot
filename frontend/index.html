@@ -222,6 +222,17 @@
           <p class="px-3 text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Recent Chats</p>
           <div id="session-list" class="space-y-1"></div>
         </div>
+        <div id="quiz-sidebar-section" class="mb-4 hidden">
+          <p class="px-3 text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Quiz</p>
+          <button type="button" id="nav-quiz-list" class="w-full flex items-center gap-3 px-3 py-3 text-sm font-medium rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 text-slate-600 dark:text-slate-400 transition-colors">
+            <span class="material-icons-round text-[18px] shrink-0">quiz</span>
+            <span class="truncate flex-1 text-left">Quiz History</span>
+          </button>
+          <button type="button" id="nav-quiz-create" class="w-full flex items-center gap-3 px-3 py-3 text-sm font-medium rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 text-slate-600 dark:text-slate-400 transition-colors mt-1 teacher-only">
+            <span class="material-icons-round text-[18px] shrink-0">add_circle_outline</span>
+            <span class="truncate flex-1 text-left">Create Quiz</span>
+          </button>
+        </div>
       </div>
       <div class="p-4 border-t border-slate-200 dark:border-white/5">
         <div class="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 transition-colors">
@@ -241,9 +252,15 @@
 
     <main class="flex-1 flex flex-col relative">
       <header class="h-16 flex items-center justify-between px-8 border-b border-slate-200 dark:border-white/5 bg-white/50 dark:bg-background-dark/50 backdrop-blur-sm z-10">
-        <div class="flex items-center gap-2">
-          <span class="text-sm font-medium text-slate-500">History /</span>
-          <span id="header-session-title" class="text-sm font-semibold">New Chat</span>
+        <div class="flex items-center gap-4">
+          <div class="flex gap-2 nav-chat">
+            <span class="text-sm font-medium text-slate-500">History /</span>
+            <span id="header-session-title" class="text-sm font-semibold">New Chat</span>
+          </div>
+          <div class="flex gap-2 nav-quiz hidden">
+            <span class="text-sm font-medium text-slate-500">Quiz /</span>
+            <span id="header-quiz-title" class="text-sm font-semibold">History</span>
+          </div>
         </div>
         <div class="flex items-center gap-2">
           <button type="button" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5 text-slate-500 transition-colors">
@@ -255,11 +272,11 @@
         </div>
       </header>
 
-      <div class="flex-1 overflow-y-auto px-4 py-8 custom-scrollbar">
-        <div id="messages" class="max-w-3xl mx-auto space-y-10"></div>
-      </div>
-
-      <div class="p-6">
+      <div id="chat-panel" class="flex-1 flex flex-col overflow-hidden">
+        <div class="flex-1 overflow-y-auto px-4 py-8 custom-scrollbar">
+          <div id="messages" class="max-w-3xl mx-auto space-y-10"></div>
+        </div>
+        <div class="p-6">
         <div class="max-w-3xl mx-auto relative group">
           <div class="absolute inset-0 bg-primary/20 blur-xl opacity-0 group-focus-within:opacity-100 transition-opacity duration-500"></div>
           <div class="relative flex items-end gap-2 bg-white dark:bg-card-dark border border-slate-200 dark:border-white/10 rounded-[24px] p-2 shadow-xl ring-1 ring-slate-900/5 focus-within:ring-primary/40 focus-within:border-primary transition-all duration-300">
@@ -287,6 +304,12 @@
           </div>
         </div>
       </div>
+      </div>
+
+      <!-- Quiz Panel -->
+      <div id="quiz-panel" class="hidden flex-1 flex flex-col overflow-hidden">
+        <div id="quiz-content" class="flex-1 overflow-y-auto px-4 py-8 custom-scrollbar"></div>
+      </div>
     </main>
   </div>
 
@@ -300,6 +323,7 @@
     let refreshToken = localStorage.getItem('refreshToken');
     let currentSessionId = null;
     let currentSessionTitle = 'New Chat';
+    let userRole = null;
 
     function showAuth() {
       document.getElementById('auth-view').classList.remove('hidden');
@@ -344,8 +368,10 @@
       let data = {};
       try { if (res.ok) data = await res.json(); } catch (_) {}
       if (data.role) {
+        userRole = data.role;
         showApp();
         loadSessions();
+        showQuizSection();
         if (!currentSessionId) createOrSelectSession();
         else { loadMessages(); document.getElementById('header-session-title').textContent = currentSessionTitle || 'New Chat'; }
         return true;
@@ -353,6 +379,354 @@
       showOnboarding();
       return false;
     }
+
+    function showQuizSection() {
+      const sec = document.getElementById('quiz-sidebar-section');
+      if (!sec) return;
+      sec.classList.remove('hidden');
+      document.querySelectorAll('.teacher-only').forEach(el => {
+        el.classList.toggle('hidden', userRole !== 'teacher');
+      });
+    }
+
+    function showChatView() {
+      document.getElementById('chat-panel').classList.remove('hidden');
+      document.getElementById('quiz-panel').classList.add('hidden');
+      document.querySelector('.nav-chat').classList.remove('hidden');
+      document.querySelector('.nav-quiz').classList.add('hidden');
+    }
+
+    function showQuizView() {
+      document.getElementById('chat-panel').classList.add('hidden');
+      document.getElementById('quiz-panel').classList.remove('hidden');
+      document.querySelector('.nav-chat').classList.add('hidden');
+      document.querySelector('.nav-quiz').classList.remove('hidden');
+    }
+
+    async function loadQuizList() {
+      showQuizView();
+      document.getElementById('header-quiz-title').textContent = 'Quiz History';
+      const content = document.getElementById('quiz-content');
+      content.innerHTML = '<div class="max-w-2xl mx-auto flex justify-center py-12"><span class="material-icons-round animate-spin text-4xl text-primary">hourglass_empty</span></div>';
+      if (userRole === 'teacher') {
+        const res = await api('/api/quizzes');
+        if (!res.ok) {
+          content.innerHTML = '<div class="max-w-2xl mx-auto text-red-400">Failed to load quizzes.</div>';
+          return;
+        }
+        const data = await res.json();
+        const quizzes = data.quizzes || [];
+        let html = '<div class="max-w-2xl mx-auto"><h2 class="text-xl font-bold mb-6">Your Quizzes</h2><div class="space-y-3">';
+        if (quizzes.length === 0) {
+          html += '<p class="text-slate-500 dark:text-slate-400 py-8">No quizzes yet. Create one from a document!</p>';
+        } else {
+          quizzes.forEach(q => {
+            const status = q.status === 'sent' ? '<span class="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">Sent</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400">Draft</span>';
+            html += `<button type="button" class="w-full text-left p-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card-dark hover:bg-slate-50 dark:hover:bg-white/5 transition-colors quiz-item" data-id="${q.id}">
+              <div class="flex justify-between items-start"><span class="font-medium">${(q.title || 'Quiz').replace(/</g, '&lt;')}</span>${status}</div>
+              <div class="text-sm text-slate-500 dark:text-slate-400 mt-1">Standard ${q.standard} · ${q.total_marks} marks · ${q.created_at?.slice(0, 10) || ''}</div>
+            </button>`;
+          });
+        }
+        html += '</div></div>';
+        content.innerHTML = html;
+        content.querySelectorAll('.quiz-item').forEach(btn => {
+          btn.onclick = () => loadQuizEdit(btn.dataset.id);
+        });
+      } else {
+        const res = await api('/api/quiz-assignments');
+        if (!res.ok) {
+          content.innerHTML = '<div class="max-w-2xl mx-auto text-red-400">Failed to load assignments.</div>';
+          return;
+        }
+        const data = await res.json();
+        const assignments = data.assignments || [];
+        let html = '<div class="max-w-2xl mx-auto"><h2 class="text-xl font-bold mb-6">Your Quizzes</h2><div class="space-y-3">';
+        if (assignments.length === 0) {
+          html += '<p class="text-slate-500 dark:text-slate-400 py-8">No quizzes assigned yet.</p>';
+        } else {
+          assignments.forEach(({ assignment, quiz }) => {
+            const due = quiz.due_at ? new Date(quiz.due_at).toLocaleString() : 'No deadline';
+            const done = assignment.status === 'submitted';
+            html += `<button type="button" class="w-full text-left p-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card-dark hover:bg-slate-50 dark:hover:bg-white/5 transition-colors quiz-take-item" data-assignment-id="${assignment.id}" data-quiz-id="${quiz.id}">
+              <div class="flex justify-between items-start"><span class="font-medium">${(quiz.title || 'Quiz').replace(/</g, '&lt;')}</span>${done ? '<span class="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">Submitted</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">Pending</span>'}</div>
+              <div class="text-sm text-slate-500 dark:text-slate-400 mt-1">Due: ${due} · ${quiz.total_marks} marks</div>
+            </button>`;
+          });
+        }
+        html += '</div></div>';
+        content.innerHTML = html;
+        content.querySelectorAll('.quiz-take-item').forEach(btn => {
+          btn.onclick = () => loadQuizTake(btn.dataset.assignmentId, btn.dataset.quizId);
+        });
+      }
+    }
+
+    async function loadQuizCreate() {
+      showQuizView();
+      document.getElementById('header-quiz-title').textContent = 'Create Quiz';
+      const content = document.getElementById('quiz-content');
+      content.innerHTML = `
+        <div class="max-w-xl mx-auto">
+          <h2 class="text-xl font-bold mb-6">Create Quiz from Document</h2>
+          <p class="text-slate-500 dark:text-slate-400 text-sm mb-6">Upload a PDF or text file. AI will generate MCQ questions for the selected grade.</p>
+          <form id="quiz-create-form" class="space-y-4">
+            <div>
+              <label class="block text-sm font-medium mb-2">Document (PDF or .txt)</label>
+              <input type="file" id="quiz-file" accept=".pdf,.txt,.text" required class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary/10 file:text-primary" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-2">Target Standard (1-12)</label>
+              <select id="quiz-standard" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5" required>
+                ${[1,2,3,4,5,6,7,8,9,10,11,12].map(s => `<option value="${s}">Standard ${s}</option>`).join('')}
+              </select>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium mb-2">Total Marks</label>
+                <input type="number" id="quiz-marks" value="10" min="1" max="100" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5" />
+              </div>
+              <div>
+                <label class="block text-sm font-medium mb-2">Number of Questions</label>
+                <input type="number" id="quiz-num" value="5" min="1" max="20" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5" />
+              </div>
+            </div>
+            <button type="submit" id="quiz-generate-btn" class="w-full py-3 bg-primary hover:bg-blue-600 text-white font-medium rounded-xl transition-all flex items-center justify-center gap-2">
+              <span class="material-icons-round">auto_awesome</span>
+              <span>Generate Quiz</span>
+            </button>
+            <p id="quiz-create-error" class="text-red-400 text-sm hidden"></p>
+          </form>
+        </div>`;
+      document.getElementById('quiz-create-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const errEl = document.getElementById('quiz-create-error');
+        errEl.classList.add('hidden');
+        const btn = document.getElementById('quiz-generate-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="material-icons-round animate-spin">hourglass_empty</span> Generating...';
+        const fd = new FormData();
+        fd.append('file', document.getElementById('quiz-file').files[0]);
+        fd.append('standard', document.getElementById('quiz-standard').value);
+        fd.append('total_marks', document.getElementById('quiz-marks').value);
+        fd.append('num_questions', document.getElementById('quiz-num').value);
+        try {
+          const res = await api('/api/quizzes/generate', { method: 'POST', body: fd });
+          if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            throw new Error(d.detail || 'Failed to generate quiz');
+          }
+          const data = await res.json();
+          loadQuizEdit(data.quiz.id);
+        } catch (ex) {
+          errEl.textContent = ex.message;
+          errEl.classList.remove('hidden');
+          btn.disabled = false;
+          btn.innerHTML = '<span class="material-icons-round">auto_awesome</span><span>Generate Quiz</span>';
+        }
+      };
+    }
+
+    async function loadQuizEdit(quizId) {
+      showQuizView();
+      document.getElementById('header-quiz-title').textContent = 'Edit Quiz';
+      const content = document.getElementById('quiz-content');
+      content.innerHTML = '<div class="max-w-2xl mx-auto flex justify-center py-12"><span class="material-icons-round animate-spin text-4xl text-primary">hourglass_empty</span></div>';
+      const res = await api(`/api/quizzes/${quizId}`);
+      if (!res.ok) {
+        content.innerHTML = '<div class="max-w-2xl mx-auto text-red-400">Quiz not found.</div>';
+        return;
+      }
+      const data = await res.json();
+      const quiz = data.quiz;
+      const questions = data.questions || [];
+      const opts = (q) => (q.options || []).length >= 4 ? q.options : [...(q.options || []), '', '', '', ''].slice(0, 4);
+      let html = `<div class="max-w-2xl mx-auto">`;
+      if (quiz.status === 'draft') {
+        html += `<div class="mb-6">
+          <label class="block text-sm font-medium mb-2">Quiz title</label>
+          <input type="text" id="quiz-edit-title" value="${(quiz.title || 'Quiz').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5" placeholder="Quiz title" />
+        </div>`;
+        html += `<div class="space-y-6 mb-8">`;
+        questions.forEach((q, i) => {
+          const options = opts(q);
+          html += `<div class="p-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card-dark">
+            <label class="block text-sm font-medium mb-2">Question ${i + 1}</label>
+            <textarea rows="2" class="quiz-q-text w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 mb-3" data-idx="${i}">${(q.question_text || '').replace(/</g, '&lt;')}</textarea>
+            <div class="space-y-2 mb-2">${options.map((o, j) => `
+              <div class="flex items-center gap-2">
+                <input type="radio" name="quiz-correct-${i}" value="${j}" ${j === (q.correct_answer ?? 0) ? 'checked' : ''} class="quiz-correct-radio" data-idx="${i}" />
+                <input type="text" class="quiz-opt flex-1 px-3 py-2 rounded-lg border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5" data-idx="${i}" data-opt="${j}" value="${(o || '').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" placeholder="Option ${String.fromCharCode(65 + j)}" />
+              </div>`).join('')}
+            </div>
+            <div class="flex gap-2 items-center">
+              <label class="text-sm text-slate-500">Marks:</label>
+              <input type="number" class="quiz-marks w-16 px-2 py-1 rounded border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5" data-idx="${i}" value="${q.marks ?? 1}" min="1" />
+            </div>
+          </div>`;
+        });
+        html += `</div>
+        <div class="flex flex-wrap gap-4 items-end">
+          <div class="flex-1 min-w-[200px]">
+            <label class="block text-sm font-medium mb-2">Due date & time</label>
+            <input type="datetime-local" id="quiz-due" class="w-full px-4 py-3 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5" />
+          </div>
+          <div class="flex gap-2">
+            <button type="button" id="quiz-save-btn" class="px-6 py-3 bg-primary hover:bg-blue-600 text-white font-medium rounded-xl transition-all flex items-center gap-2">
+              <span class="material-icons-round">save</span>
+              <span>Save</span>
+            </button>
+            <button type="button" id="quiz-send-btn" class="px-6 py-3 bg-green-600 hover:bg-green-700 text-white font-medium rounded-xl transition-all flex items-center gap-2">
+              <span class="material-icons-round">send</span>
+              <span>Send to Students</span>
+            </button>
+          </div>
+        </div>
+        <p id="quiz-edit-error" class="text-red-400 text-sm mt-2 hidden"></p>`;
+      } else {
+        html += `<div class="flex justify-between items-center mb-6"><h2 class="text-xl font-bold">${(quiz.title || 'Quiz').replace(/</g, '&lt;')}</h2><span class="text-sm text-slate-500">Standard ${quiz.standard} · ${quiz.total_marks} marks</span></div>`;
+        html += `<p class="text-green-500 dark:text-green-400 mb-4">Already sent to students.</p><div class="space-y-6">`;
+        questions.forEach((q, i) => {
+          html += `<div class="p-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card-dark">
+            <p class="font-medium mb-2">${i + 1}. ${(q.question_text || '').replace(/</g, '&lt;')}</p>
+            <ul class="list-disc list-inside text-sm text-slate-500 dark:text-slate-400">${(q.options || []).map(o => `<li>${(o || '').replace(/</g, '&lt;')}</li>`).join('')}</ul>
+          </div>`;
+        });
+        html += '</div>';
+      }
+      html += '</div>';
+      content.innerHTML = html;
+      if (quiz.status === 'draft') {
+        const dueInput = document.getElementById('quiz-due');
+        const d = new Date();
+        d.setDate(d.getDate() + 7);
+        dueInput.value = d.toISOString().slice(0, 16);
+        if (quiz.due_at) dueInput.value = new Date(quiz.due_at).toISOString().slice(0, 16);
+
+        function gatherQuestions() {
+          const qs = [];
+          const count = questions.length;
+          for (let i = 0; i < count; i++) {
+            const textEl = content.querySelector(`.quiz-q-text[data-idx="${i}"]`);
+            const correctEl = content.querySelector(`input.quiz-correct-radio[data-idx="${i}"]:checked`);
+            const marksEl = content.querySelector(`.quiz-marks[data-idx="${i}"]`);
+            const options = [];
+            for (let j = 0; j < 4; j++) {
+              const o = content.querySelector(`.quiz-opt[data-idx="${i}"][data-opt="${j}"]`);
+              options.push(o ? o.value.trim() : '');
+            }
+            const validOpts = options.filter(o => o);
+            if (!textEl || textEl.value.trim() === '' || validOpts.length < 2) continue;
+            const correctIdx = correctEl ? parseInt(correctEl.value, 10) : 0;
+            const correctVal = options[correctIdx] || validOpts[0];
+            const newCorrectIdx = validOpts.indexOf(correctVal);
+            qs.push({
+              question_text: textEl.value.trim(),
+              options: validOpts,
+              correct_answer: newCorrectIdx >= 0 ? newCorrectIdx : 0,
+              marks: parseInt(marksEl?.value || 1, 10) || 1
+            });
+          }
+          return qs;
+        }
+
+        document.getElementById('quiz-save-btn').onclick = async () => {
+          const errEl = document.getElementById('quiz-edit-error');
+          errEl.classList.add('hidden');
+          const title = document.getElementById('quiz-edit-title').value.trim();
+          const qs = gatherQuestions();
+          if (!title) { errEl.textContent = 'Please enter a quiz title'; errEl.classList.remove('hidden'); return; }
+          if (qs.length === 0) { errEl.textContent = 'At least one question with options is required'; errEl.classList.remove('hidden'); return; }
+          try {
+            const r = await api(`/api/quizzes/${quizId}`, {
+              method: 'PUT',
+              body: JSON.stringify({ title, questions: qs })
+            });
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'Failed to save');
+            errEl.textContent = '';
+            errEl.classList.remove('hidden');
+            errEl.className = 'text-green-500 text-sm mt-2';
+            errEl.textContent = 'Saved!';
+            loadQuizEdit(quizId);
+          } catch (ex) {
+            errEl.className = 'text-red-400 text-sm mt-2';
+            errEl.textContent = ex.message;
+            errEl.classList.remove('hidden');
+          }
+        };
+
+        document.getElementById('quiz-send-btn').onclick = async () => {
+          const errEl = document.getElementById('quiz-edit-error');
+          errEl.classList.add('hidden');
+          const dueVal = dueInput.value;
+          if (!dueVal) { errEl.textContent = 'Please set a due date'; errEl.classList.remove('hidden'); return; }
+          try {
+            const r = await api(`/api/quizzes/${quizId}/send`, { method: 'POST', body: JSON.stringify({ due_at: new Date(dueVal).toISOString() }) });
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'Failed to send');
+            loadQuizEdit(quizId);
+          } catch (ex) {
+            errEl.textContent = ex.message;
+            errEl.classList.remove('hidden');
+          }
+        };
+      }
+    }
+
+    async function loadQuizTake(assignmentId, quizId) {
+      showQuizView();
+      document.getElementById('header-quiz-title').textContent = 'Take Quiz';
+      const content = document.getElementById('quiz-content');
+      content.innerHTML = '<div class="max-w-2xl mx-auto flex justify-center py-12"><span class="material-icons-round animate-spin text-4xl text-primary">hourglass_empty</span></div>';
+      const res = await api(`/api/quizzes/${quizId}`);
+      if (!res.ok) {
+        content.innerHTML = '<div class="max-w-2xl mx-auto text-red-400">Quiz not found.</div>';
+        return;
+      }
+      const data = await res.json();
+      const quiz = data.quiz;
+      const questions = data.questions || [];
+      const resA = await api(`/api/quiz-assignments`);
+      const ad = await resA.json();
+      const myAssignment = (ad.assignments || []).find(a => a.assignment.id === assignmentId);
+      if (!myAssignment || myAssignment.assignment.status === 'submitted') {
+        content.innerHTML = `<div class="max-w-2xl mx-auto"><p class="text-green-500 mb-4">You have already submitted this quiz. Score: ${myAssignment?.assignment?.score ?? '—'}/${quiz.total_marks}</p></div>`;
+        return;
+      }
+      let html = `<div class="max-w-2xl mx-auto"><h2 class="text-xl font-bold mb-2">${(quiz.title || 'Quiz').replace(/</g, '&lt;')}</h2><p class="text-slate-500 dark:text-slate-400 text-sm mb-6">${quiz.total_marks} marks · Answer all questions and submit.</p><form id="quiz-submit-form">`;
+      questions.forEach((q, i) => {
+        html += `<div class="p-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card-dark mb-4">
+          <p class="font-medium mb-3">${i + 1}. ${(q.question_text || '').replace(/</g, '&lt;')}</p>
+          <div class="space-y-2">${(q.options || []).map((opt, j) => `
+            <label class="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-white/5">
+              <input type="radio" name="q_${q.id}" value="${j}" required />
+              <span>${(opt || '').replace(/</g, '&lt;')}</span>
+            </label>`).join('')}
+          </div>
+        </div>`;
+      });
+      html += `<button type="submit" class="w-full py-3 bg-primary hover:bg-blue-600 text-white font-medium rounded-xl">Submit Quiz</button></form></div>`;
+      content.innerHTML = html;
+      document.getElementById('quiz-submit-form').onsubmit = async (e) => {
+        e.preventDefault();
+        const form = e.target;
+        const answers = {};
+        questions.forEach(q => {
+          const sel = form.querySelector(`input[name="q_${q.id}"]:checked`);
+          if (sel) answers[q.id] = parseInt(sel.value, 10);
+        });
+        try {
+          const r = await api(`/api/quiz-assignments/${assignmentId}/submit`, { method: 'POST', body: JSON.stringify({ answers }) });
+          if (!r.ok) throw new Error('Failed to submit');
+          const d = await r.json();
+          content.innerHTML = `<div class="max-w-2xl mx-auto"><p class="text-green-500 text-lg font-medium mb-2">Quiz submitted!</p><p>Your score: ${d.score}/${quiz.total_marks}</p></div>`;
+        } catch (ex) {
+          alert('Failed to submit: ' + ex.message);
+        }
+      };
+    }
+
+    document.getElementById('nav-quiz-list').onclick = loadQuizList;
+    document.getElementById('nav-quiz-create').onclick = loadQuizCreate;
 
     async function api(path, options = {}) {
       const headers = { ...options.headers };
@@ -475,8 +849,10 @@
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Failed to save profile');
+        userRole = role;
         showApp();
         loadSessions();
+        showQuizSection();
         createOrSelectSession();
       } catch (ex) {
         err.textContent = ex.message;
@@ -539,6 +915,7 @@
       const data = await res.json();
       currentSessionId = data.id;
       currentSessionTitle = data.title || 'New Chat';
+      showChatView();
       document.getElementById('header-session-title').textContent = currentSessionTitle;
       await loadSessions();
       await loadMessages();
@@ -548,6 +925,7 @@
 
     function selectSession(id) {
       currentSessionId = id;
+      showChatView();
       const session = document.querySelector(`[data-id="${id}"]`);
       currentSessionTitle = session?.querySelector('.truncate')?.textContent || 'New Chat';
       document.getElementById('header-session-title').textContent = currentSessionTitle;

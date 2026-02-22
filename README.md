@@ -12,7 +12,7 @@ A simple chatbot using the Claude Agent Python SDK with web search, per-user ses
 2. **Environment**
    ```bash
    cp .env.example .env
-   # Edit .env with your SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
+   # Edit .env with your SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and OPENAI_API_KEY (for quiz generation)
    ```
 
 3. **Backend**
@@ -30,6 +30,13 @@ A simple chatbot using the Claude Agent Python SDK with web search, per-user ses
 5. **Claude Code CLI**
    - The SDK requires [Claude Code CLI](https://code.claude.com) to be installed and authenticated
 
+## Quiz Feature (Teachers & Students)
+
+- **Teachers**: Create quizzes from PDF/text documents (AI-generated via OpenAI), review in Quiz History, edit if needed, and send to students by grade (standard 1–12) with a due date.
+- **Students**: See assigned quizzes, take them (MCQ), and submit before the due date.
+
+Run `supabase_quiz_migration.sql` in the Supabase SQL Editor after the main schema. Add `OPENAI_API_KEY` to `.env` for quiz generation.
+
 ## API
 
 - `POST /api/auth/signup` - Create account
@@ -40,3 +47,10 @@ A simple chatbot using the Claude Agent Python SDK with web search, per-user ses
 - `GET /api/sessions` - List sessions
 - `GET /api/sessions/{id}/messages` - Get message history
 - `POST /api/sessions/{id}/chat` - Send message, stream response (SSE)
+- `POST /api/quizzes/generate` - Generate quiz from document (teachers)
+- `GET /api/quizzes` - List teacher's quizzes
+- `GET /api/quizzes/{id}` - Get quiz with questions
+- `PUT /api/quizzes/{id}` - Update quiz (draft only)
+- `POST /api/quizzes/{id}/send` - Send quiz to students
+- `GET /api/quiz-assignments` - List student's assigned quizzes
+- `POST /api/quiz-assignments/{id}/submit` - Submit quiz (students)

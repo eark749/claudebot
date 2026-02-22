@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from auth import get_current_user
 from claude_service import stream_chat
 from config import validate_config
+from quiz_service import generate_quiz as do_generate_quiz
 from supabase_client import get_supabase
 
 
@@ -57,6 +58,43 @@ class ProfileUpdateRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str
+
+
+class QuizGenerateRequest(BaseModel):
+    standard: int  # 1-12
+    total_marks: int = 10
+    num_questions: int = 5
+
+
+class QuizQuestionUpdate(BaseModel):
+    question_text: str
+    options: list[str]
+    correct_answer: int
+    marks: int
+
+
+class QuizUpdateRequest(BaseModel):
+    title: str | None = None
+    due_at: str | None = None
+    questions: list[QuizQuestionUpdate] | None = None
+
+
+class QuizSendRequest(BaseModel):
+    due_at: str  # ISO datetime string
+
+
+class QuizSubmitRequest(BaseModel):
+    answers: dict[str, int]  # question_id -> selected option index (0-based)
+
+
+def _get_profile(user_id: str) -> tuple[str | None, int | None]:
+    """Return (role, standard) for user."""
+    supabase = get_supabase()
+    r = supabase.table("user_profiles").select("role, standard").eq("user_id", user_id).execute()
+    if not r.data or len(r.data) == 0:
+        return (None, None)
+    row = r.data[0]
+    return (row.get("role"), row.get("standard"))
 
 
 # --- Auth routes (no JWT required) ---
@@ -251,6 +289,290 @@ async def get_messages(
         .execute()
     )
     return {"messages": result.data or []}
+
+
+# --- Quiz routes (JWT required) ---
+
+
+@app.post("/api/quizzes/generate")
+async def quiz_generate(
+    user: Annotated[dict, Depends(get_current_user)],
+    file: UploadFile = File(...),
+    standard: int = Form(...),
+    total_marks: int = Form(10),
+    num_questions: int = Form(5),
+):
+    """Generate a quiz from document. Teachers only."""
+    role, _ = _get_profile(user["id"])
+    if role != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can create quizzes")
+    if not (1 <= standard <= 12):
+        raise HTTPException(status_code=400, detail="standard must be 1-12")
+    if num_questions < 1 or num_questions > 20:
+        raise HTTPException(status_code=400, detail="num_questions must be 1-20")
+
+    doc_text = extract_text_from_file(file)
+    if not doc_text.strip():
+        raise HTTPException(status_code=400, detail="Could not extract text from document")
+
+    try:
+        questions = do_generate_quiz(
+            document_content=doc_text,
+            standard=standard,
+            total_marks=total_marks,
+            num_questions=num_questions,
+            document_name=file.filename or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Quiz generation failed: {e}") from e
+
+    supabase = get_supabase()
+    quiz_row = {
+        "teacher_id": user["id"],
+        "title": (file.filename or "Quiz").replace(".pdf", "").replace(".txt", ""),
+        "document_name": file.filename,
+        "standard": standard,
+        "total_marks": total_marks,
+        "status": "draft",
+    }
+    qr = supabase.table("quizzes").insert(quiz_row).execute()
+    if not qr.data or len(qr.data) == 0:
+        raise HTTPException(status_code=500, detail="Failed to create quiz")
+    quiz_id = qr.data[0]["id"]
+
+    for i, q in enumerate(questions):
+        supabase.table("quiz_questions").insert({
+            "quiz_id": quiz_id,
+            "order_idx": i,
+            "question_text": q["question_text"],
+            "question_type": "mcq",
+            "marks": q["marks"],
+            "options": q["options"],
+            "correct_answer": q["correct_answer"],
+        }).execute()
+
+    result = (
+        supabase.table("quizzes")
+        .select("id, title, standard, total_marks, status, created_at")
+        .eq("id", quiz_id)
+        .single()
+        .execute()
+    )
+    return {"quiz": result.data}
+
+
+@app.get("/api/quizzes")
+async def list_quizzes(user: Annotated[dict, Depends(get_current_user)]):
+    """List teacher's quizzes. Teachers only."""
+    role, _ = _get_profile(user["id"])
+    if role != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can list quizzes")
+    supabase = get_supabase()
+    r = (
+        supabase.table("quizzes")
+        .select("id, title, standard, total_marks, status, created_at, sent_at, due_at")
+        .eq("teacher_id", user["id"])
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return {"quizzes": r.data or []}
+
+
+@app.get("/api/quizzes/{quiz_id}")
+async def get_quiz(
+    quiz_id: uuid.UUID,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Get quiz with questions. Teacher (owner) or student (assigned)."""
+    supabase = get_supabase()
+    role, standard = _get_profile(user["id"])
+    q = supabase.table("quizzes").select("*").eq("id", str(quiz_id)).execute()
+    if not q.data or len(q.data) == 0:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    quiz = q.data[0]
+    if quiz["teacher_id"] == user["id"]:
+        pass
+    elif role == "student":
+        a = supabase.table("quiz_assignments").select("id").eq("quiz_id", str(quiz_id)).eq("student_id", user["id"]).execute()
+        if not a.data or len(a.data) == 0:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+    else:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    questions = (
+        supabase.table("quiz_questions")
+        .select("id, order_idx, question_text, options, correct_answer, marks")
+        .eq("quiz_id", str(quiz_id))
+        .order("order_idx")
+        .execute()
+    )
+    # For students, don't send correct_answer
+    is_student = role == "student"
+    qlist = []
+    for qq in (questions.data or []):
+        d = {k: v for k, v in qq.items() if k != "correct_answer" or not is_student}
+        qlist.append(d)
+    return {"quiz": quiz, "questions": qlist}
+
+
+@app.put("/api/quizzes/{quiz_id}")
+async def update_quiz(
+    quiz_id: uuid.UUID,
+    body: QuizUpdateRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Update quiz. Teachers only, draft only."""
+    role, _ = _get_profile(user["id"])
+    if role != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can edit quizzes")
+    supabase = get_supabase()
+    q = supabase.table("quizzes").select("id, status").eq("id", str(quiz_id)).eq("teacher_id", user["id"]).execute()
+    if not q.data or len(q.data) == 0:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    if q.data[0]["status"] != "draft":
+        raise HTTPException(status_code=400, detail="Cannot edit sent quiz")
+
+    updates = {}
+    if body.title is not None:
+        updates["title"] = body.title
+    if body.due_at is not None:
+        updates["due_at"] = body.due_at
+    if updates:
+        supabase.table("quizzes").update(updates).eq("id", str(quiz_id)).execute()
+
+    if body.questions is not None:
+        supabase.table("quiz_questions").delete().eq("quiz_id", str(quiz_id)).execute()
+        for i, qq in enumerate(body.questions):
+            supabase.table("quiz_questions").insert({
+                "quiz_id": str(quiz_id),
+                "order_idx": i,
+                "question_text": qq.question_text,
+                "question_type": "mcq",
+                "marks": qq.marks,
+                "options": qq.options,
+                "correct_answer": qq.correct_answer,
+            }).execute()
+
+    result = supabase.table("quizzes").select("*").eq("id", str(quiz_id)).single().execute()
+    return {"quiz": result.data}
+
+
+@app.post("/api/quizzes/{quiz_id}/send")
+async def send_quiz(
+    quiz_id: uuid.UUID,
+    body: QuizSendRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Send quiz to students of that standard. Teachers only."""
+    role, _ = _get_profile(user["id"])
+    if role != "teacher":
+        raise HTTPException(status_code=403, detail="Only teachers can send quizzes")
+    supabase = get_supabase()
+    q = supabase.table("quizzes").select("id, standard, status").eq("id", str(quiz_id)).eq("teacher_id", user["id"]).execute()
+    if not q.data or len(q.data) == 0:
+        raise HTTPException(status_code=404, detail="Quiz not found")
+    if q.data[0]["status"] == "sent":
+        raise HTTPException(status_code=400, detail="Quiz already sent")
+    standard = q.data[0]["standard"]
+
+    students = (
+        supabase.table("user_profiles")
+        .select("user_id")
+        .eq("role", "student")
+        .eq("standard", standard)
+        .execute()
+    )
+    student_ids = [s["user_id"] for s in (students.data or [])]
+    now = datetime.now(timezone.utc).isoformat()
+    for sid in student_ids:
+        try:
+            supabase.table("quiz_assignments").insert({
+                "quiz_id": str(quiz_id),
+                "student_id": sid,
+                "status": "pending",
+            }).execute()
+        except Exception:
+            pass
+
+    supabase.table("quizzes").update({
+        "status": "sent",
+        "sent_at": now,
+        "due_at": body.due_at,
+        "updated_at": now,
+    }).eq("id", str(quiz_id)).execute()
+
+    return {"sent_to": len(student_ids), "due_at": body.due_at}
+
+
+@app.get("/api/quiz-assignments")
+async def list_quiz_assignments(user: Annotated[dict, Depends(get_current_user)]):
+    """List student's assigned quizzes. Students only."""
+    role, _ = _get_profile(user["id"])
+    if role != "student":
+        raise HTTPException(status_code=403, detail="Only students can view assignments")
+    supabase = get_supabase()
+    r = (
+        supabase.table("quiz_assignments")
+        .select("id, quiz_id, status, submitted_at, created_at")
+        .eq("student_id", user["id"])
+        .order("created_at", desc=True)
+        .execute()
+    )
+    assignments = r.data or []
+    out = []
+    for a in assignments:
+        q = supabase.table("quizzes").select("id, title, total_marks, due_at").eq("id", a["quiz_id"]).single().execute()
+        if q.data:
+            out.append({"assignment": a, "quiz": q.data})
+    return {"assignments": out}
+
+
+@app.post("/api/quiz-assignments/{assignment_id}/submit")
+async def submit_quiz(
+    assignment_id: uuid.UUID,
+    body: QuizSubmitRequest,
+    user: Annotated[dict, Depends(get_current_user)],
+):
+    """Student submits quiz answers."""
+    role, _ = _get_profile(user["id"])
+    if role != "student":
+        raise HTTPException(status_code=403, detail="Only students can submit quizzes")
+    supabase = get_supabase()
+    a = (
+        supabase.table("quiz_assignments")
+        .select("id, quiz_id, status")
+        .eq("id", str(assignment_id))
+        .eq("student_id", user["id"])
+        .execute()
+    )
+    if not a.data or len(a.data) == 0:
+        raise HTTPException(status_code=404, detail="Assignment not found")
+    if a.data[0]["status"] == "submitted":
+        raise HTTPException(status_code=400, detail="Already submitted")
+
+    questions = (
+        supabase.table("quiz_questions")
+        .select("id, correct_answer, marks")
+        .eq("quiz_id", a.data[0]["quiz_id"])
+        .execute()
+    )
+    qmap = {str(q["id"]): q for q in (questions.data or [])}
+    score = 0
+    for qid, chosen in body.answers.items():
+        if qid in qmap and qmap[qid]["correct_answer"] == chosen:
+            score += qmap[qid]["marks"]
+
+    now = datetime.now(timezone.utc).isoformat()
+    supabase.table("quiz_assignments").update({
+        "status": "submitted",
+        "answers": body.answers,
+        "score": score,
+        "submitted_at": now,
+    }).eq("id", str(assignment_id)).execute()
+
+    return {"score": score, "submitted_at": now}
 
 
 def sse_format(event: str, data: str) -> str:
