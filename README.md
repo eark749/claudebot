@@ -40,8 +40,3 @@ A simple chatbot using the Claude Agent Python SDK with web search, per-user ses
 - `GET /api/sessions` - List sessions
 - `GET /api/sessions/{id}/messages` - Get message history
 - `POST /api/sessions/{id}/chat` - Send message, stream response (SSE)
-
-
-SUPABASE_URL = https://rfeelruxgajojlejdzpr.supabase.co
-SUPABASE_SERVICE_ROLE_KEY= eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJmZWVscnV4Z2Fqb2psZWpkenByIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MTczNzE5NywiZXhwIjoyMDg3MzEzMTk3fQ.t45OPkXVoO68Zbc64TN2K1SBjZQj1VcOTMa2jBKrYPo
-#zTyd1kAPlLRDEMEW
