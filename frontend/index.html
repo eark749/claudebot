@@ -224,9 +224,10 @@
         </div>
         <div id="quiz-sidebar-section" class="mb-4 hidden">
           <p class="px-3 text-[11px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest mb-2">Quiz</p>
-          <button type="button" id="nav-quiz-list" class="w-full flex items-center gap-3 px-3 py-3 text-sm font-medium rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 text-slate-600 dark:text-slate-400 transition-colors">
+          <button type="button" id="nav-quiz-list" class="w-full flex items-center gap-3 px-3 py-3 text-sm font-medium rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 text-slate-600 dark:text-slate-400 transition-colors relative">
             <span class="material-icons-round text-[18px] shrink-0">quiz</span>
-            <span class="truncate flex-1 text-left">Quiz History</span>
+            <span id="nav-quiz-label" class="truncate flex-1 text-left">Quiz History</span>
+            <span id="quiz-noti-badge" class="hidden shrink-0 px-2 py-0.5 text-[10px] font-bold rounded-full bg-amber-500 text-white">New</span>
           </button>
           <button type="button" id="nav-quiz-create" class="w-full flex items-center gap-3 px-3 py-3 text-sm font-medium rounded-xl hover:bg-slate-100 dark:hover:bg-white/5 text-slate-600 dark:text-slate-400 transition-colors mt-1 teacher-only">
             <span class="material-icons-round text-[18px] shrink-0">add_circle_outline</span>
@@ -387,6 +388,32 @@
       document.querySelectorAll('.teacher-only').forEach(el => {
         el.classList.toggle('hidden', userRole !== 'teacher');
       });
+      const label = document.getElementById('nav-quiz-label');
+      const badge = document.getElementById('quiz-noti-badge');
+      if (label) label.textContent = userRole === 'teacher' ? 'Quiz History' : 'Quiz';
+      if (badge) badge.classList.add('hidden');
+      if (userRole === 'student') updateQuizNotiBadge();
+    }
+
+    async function updateQuizNotiBadge(pendingCount) {
+      const badge = document.getElementById('quiz-noti-badge');
+      if (!badge || userRole !== 'student') return;
+      if (typeof pendingCount === 'number') {
+        if (pendingCount > 0) {
+          badge.textContent = pendingCount === 1 ? 'New' : pendingCount;
+          badge.classList.remove('hidden');
+        } else {
+          badge.classList.add('hidden');
+        }
+        return;
+      }
+      try {
+        const res = await api('/api/quiz-assignments');
+        if (!res.ok) return;
+        const data = await res.json();
+        const pending = (data.assignments || []).filter(a => a.assignment?.status === 'pending');
+        updateQuizNotiBadge(pending.length);
+      } catch (_) {}
     }
 
     function showChatView() {
@@ -405,7 +432,7 @@
 
     async function loadQuizList() {
       showQuizView();
-      document.getElementById('header-quiz-title').textContent = 'Quiz History';
+      document.getElementById('header-quiz-title').textContent = userRole === 'teacher' ? 'Quiz History' : 'My Quizzes';
       const content = document.getElementById('quiz-content');
       content.innerHTML = '<div class="max-w-2xl mx-auto flex justify-center py-12"><span class="material-icons-round animate-spin text-4xl text-primary">hourglass_empty</span></div>';
       if (userRole === 'teacher') {
@@ -441,15 +468,31 @@
         }
         const data = await res.json();
         const assignments = data.assignments || [];
-        let html = '<div class="max-w-2xl mx-auto"><h2 class="text-xl font-bold mb-6">Your Quizzes</h2><div class="space-y-3">';
+        const pendingList = assignments.filter(a => a.assignment?.status === 'pending');
+        updateQuizNotiBadge(pendingList.length);
+        let html = '<div class="max-w-2xl mx-auto">';
+        if (pendingList.length > 0) {
+          html += `<div class="mb-6 p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center gap-3">
+            <span class="material-icons-round text-amber-500 text-2xl">notifications_active</span>
+            <div>
+              <p class="font-semibold text-amber-700 dark:text-amber-400">New quiz assigned!</p>
+              <p class="text-sm text-amber-600/80 dark:text-amber-500/80">You have ${pendingList.length} quiz${pendingList.length > 1 ? 'zes' : ''} to complete. Submit before the due date.</p>
+            </div>
+          </div>`;
+        }
+        html += '<h2 class="text-xl font-bold mb-6">My Quizzes</h2><div class="space-y-3">';
         if (assignments.length === 0) {
-          html += '<p class="text-slate-500 dark:text-slate-400 py-8">No quizzes assigned yet.</p>';
+          html += '<p class="text-slate-500 dark:text-slate-400 py-8">No quizzes assigned yet. Your teacher will assign quizzes here when they\'re ready.</p>';
         } else {
           assignments.forEach(({ assignment, quiz }) => {
             const due = quiz.due_at ? new Date(quiz.due_at).toLocaleString() : 'No deadline';
             const done = assignment.status === 'submitted';
-            html += `<button type="button" class="w-full text-left p-4 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-card-dark hover:bg-slate-50 dark:hover:bg-white/5 transition-colors quiz-take-item" data-assignment-id="${assignment.id}" data-quiz-id="${quiz.id}">
-              <div class="flex justify-between items-start"><span class="font-medium">${(quiz.title || 'Quiz').replace(/</g, '&lt;')}</span>${done ? '<span class="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400">Submitted</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary">Pending</span>'}</div>
+            const isPending = !done;
+            html += `<button type="button" class="w-full text-left p-4 rounded-xl border transition-colors quiz-take-item ${isPending ? 'border-amber-500/30 bg-amber-500/5 dark:bg-amber-500/10' : 'border-slate-200 dark:border-white/10 bg-white dark:bg-card-dark'} hover:bg-slate-50 dark:hover:bg-white/5" data-assignment-id="${assignment.id}" data-quiz-id="${quiz.id}">
+              <div class="flex justify-between items-start gap-2">
+                <span class="font-medium">${(quiz.title || 'Quiz').replace(/</g, '&lt;')}</span>
+                ${done ? '<span class="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 shrink-0">Submitted</span>' : '<span class="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-500 dark:text-amber-400 shrink-0">New · Take quiz</span>'}
+              </div>
               <div class="text-sm text-slate-500 dark:text-slate-400 mt-1">Due: ${due} · ${quiz.total_marks} marks</div>
             </button>`;
           });
@@ -718,6 +761,7 @@
           const r = await api(`/api/quiz-assignments/${assignmentId}/submit`, { method: 'POST', body: JSON.stringify({ answers }) });
           if (!r.ok) throw new Error('Failed to submit');
           const d = await r.json();
+          updateQuizNotiBadge();
           content.innerHTML = `<div class="max-w-2xl mx-auto"><p class="text-green-500 text-lg font-medium mb-2">Quiz submitted!</p><p>Your score: ${d.score}/${quiz.total_marks}</p></div>`;
         } catch (ex) {
           alert('Failed to submit: ' + ex.message);
