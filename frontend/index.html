@@ -1158,6 +1158,8 @@
                   } else if (d.type === 'text' && d.content) {
                     rawResponse += d.content;
                     responseBlock.innerHTML = renderMd(rawResponse);
+                  } else if (d.type === 'error' && d.content) {
+                    responseBlock.innerHTML = '<span class="text-red-400">Error: ' + (d.content || 'Unknown error').replace(/</g, '&lt;') + '</span>';
                   }
                 } catch (_) {}
               }

@@ -3,13 +3,13 @@
 import asyncio
 import io
 import json
+import sys
 import uuid
 
 from pypdf import PdfReader
 
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-from queue import Empty, Queue
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile, status
@@ -18,7 +18,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from auth import get_current_user
-from claude_service import stream_chat
 from config import validate_config
 from quiz_service import generate_quiz as do_generate_quiz
 from supabase_client import get_supabase
@@ -716,64 +715,79 @@ async def chat(
         )
         system_prompt = f"{doc_instruction}\n\n{system_prompt}" if system_prompt else doc_instruction
 
-    # Use a thread + sync Queue so the SDK runs in an isolated event loop,
-    # avoiding "exit cancel scope in different task" from anyio when the HTTP request ends.
-    thread_queue: Queue[tuple[str, str | None] | None] = Queue()
-    loop = asyncio.get_event_loop()
-    executor = ThreadPoolExecutor(max_workers=1)
-
-    def run_in_thread():
-        async def _produce():
-            try:
-                async for event_type, data in stream_chat(
-                    prompt=prompt_text,
-                    claude_session_id=claude_session_id,
-                    system_prompt=system_prompt,
-                ):
-                    thread_queue.put((event_type, data))
-            finally:
-                thread_queue.put(None)
-
-        try:
-            asyncio.run(_produce())
-        except RuntimeError:
-            pass
+    # Run SDK in a subprocess to avoid claude-agent-sdk's anyio cancel scope bug
+    # (RuntimeError: "Attempted to exit cancel scope in a different task")
+    # which poisons the event loop and prevents responses from being sent.
+    backend_dir = Path(__file__).resolve().parent
+    worker_script = backend_dir / "stream_chat_worker.py"
 
     async def generate():
-        future = loop.run_in_executor(executor, run_in_thread)
         raw_response_chunks: list[str] = []
         final_session_id = None
+        proc = None
 
-        while True:
-            try:
-                item = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: thread_queue.get(timeout=600)
-                )
-            except Empty:
-                break
-            if item is None:
-                break
-            event_type, data = item
-            if event_type == "thinking":
-                if data:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-u",  # Unbuffered stdout for streaming
+                str(worker_script),
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(backend_dir),
+            )
+            # Send input
+            input_json = json.dumps({
+                "prompt": prompt_text,
+                "claude_session_id": claude_session_id,
+                "system_prompt": system_prompt,
+            })
+            proc.stdin.write(input_json.encode())
+            await proc.stdin.drain()
+            proc.stdin.close()
+
+            # Stream events line by line
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                line = line.decode(errors="replace").strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    event_type = obj.get("event")
+                    data = obj.get("data")
+                except json.JSONDecodeError:
+                    continue
+
+                if event_type == "thinking" and data:
                     yield sse_format(
                         "message",
                         json.dumps({"type": "thinking", "content": data}),
                     )
-            elif event_type == "text":
-                if data:
+                elif event_type == "text" and data:
                     raw_response_chunks.append(data)
                     yield sse_format(
                         "message",
                         json.dumps({"type": "text", "content": data}),
                     )
-            elif event_type == "done":
-                final_session_id = data
+                elif event_type == "done":
+                    final_session_id = data
+                elif event_type == "error":
+                    yield sse_format(
+                        "message",
+                        json.dumps({"type": "error", "content": data or "Unknown error"}),
+                    )
 
-        try:
-            await future
-        except RuntimeError:
-            pass
+        finally:
+            if proc and proc.returncode is None:
+                proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
 
         full_response = "".join(raw_response_chunks)
 
